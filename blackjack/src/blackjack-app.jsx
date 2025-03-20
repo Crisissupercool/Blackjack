@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 
 function BlackjackGame() {
-  // States für Deck, Spieler- und Dealer-Karten, verbleibende Karten
+  const [stake, setStake] = useState('');
+  const [gameStarted, setGameStarted] = useState(false);
   const [deckId, setDeckId] = useState(null);
   const [playerCards, setPlayerCards] = useState([]);
   const [dealerCards, setDealerCards] = useState([]);
   const [remaining, setRemaining] = useState(0);
+  const [result, setResult] = useState('');
+  const [playerStand, setPlayerStand] = useState(false); // Signal, dass der Spieler stehen bleibt
 
-  // Beim Laden des Components: Neues Deck initialisieren (6 Decks)
-  useEffect(() => {
+  // Deck initialisieren (6 Decks)
+  const initializeDeck = () => {
     fetch('https://deckofcardsapi.com/api/deck/new/shuffle/?deck_count=6')
       .then(res => res.json())
       .then(data => {
@@ -16,11 +19,17 @@ function BlackjackGame() {
         setRemaining(data.remaining);
       })
       .catch(err => console.error("Fehler beim Laden des Decks:", err));
-  }, []);
+  };
 
-  // Funktion, um eine oder mehrere Karten zu ziehen
+  useEffect(() => {
+    if (gameStarted) {
+      initializeDeck();
+    }
+  }, [gameStarted]);
+
+  // Funktion, um Karten zu ziehen (wenn das Spiel läuft)
   const drawCard = async (count = 1) => {
-    if (!deckId) return;
+    if (!deckId || result) return;
     try {
       const response = await fetch(`https://deckofcardsapi.com/api/deck/${deckId}/draw/?count=${count}`);
       const data = await response.json();
@@ -35,6 +44,7 @@ function BlackjackGame() {
 
   // Spieler zieht eine Karte
   const handlePlayerDraw = async () => {
+    if (result || playerStand) return;
     const cards = await drawCard(1);
     if (cards) {
       setPlayerCards(prev => [...prev, ...cards]);
@@ -49,7 +59,7 @@ function BlackjackGame() {
     }
   };
 
-  // Funktion zur Punkteberechnung (Asse als 1 oder 11)
+  // Punkteberechnung: Zahlenwerte, Bildkarten = 10, Asse flexibel (11 bzw. 1)
   const calculatePoints = (cards) => {
     let points = 0;
     let aces = 0;
@@ -64,7 +74,6 @@ function BlackjackGame() {
         points += parseInt(value, 10);
       }
     });
-    // Korrigiere Punkte, falls Asse zu hoch zählen
     while (points > 21 && aces > 0) {
       points -= 10;
       aces--;
@@ -75,22 +84,94 @@ function BlackjackGame() {
   const playerPoints = calculatePoints(playerCards);
   const dealerPoints = calculatePoints(dealerCards);
 
-  // Funktion für einen Reset des Spiels (neues Deck und leere Hände)
+  // Überprüfe den Spielerstand: Überschreitet er 21, ist das Spiel sofort verloren
+  useEffect(() => {
+    if (!gameStarted || playerCards.length === 0) return;
+    if (playerPoints > 21) {
+      setResult("💀 Du hast über 21! Du verlierst.");
+    }
+  }, [playerCards, playerPoints, gameStarted]);
+
+  // Sobald der Spieler "Stand" wählt, übernimmt der Dealer automatisch
+  const handleStand = async () => {
+    if (result) return;
+    setPlayerStand(true);
+  
+    let dealerHand = [...dealerCards];
+    let dealerTotal = calculatePoints(dealerHand);
+  
+    while (dealerTotal < 17) {
+      const newCard = await drawCard(1);
+      dealerHand = [...dealerHand, ...newCard];
+      setDealerCards(dealerHand); // State aktualisieren
+      await new Promise(resolve => setTimeout(resolve, 500)); // kleine Pause für Realismus
+  
+      dealerTotal = calculatePoints(dealerHand);
+  
+      if (dealerTotal > 21) {
+        setResult("🎉 Dealer hat über 21! Du gewinnst!");
+        return;
+      }
+    }
+  
+    // Dealer hat 17+ erreicht, jetzt vergleichen
+    if (dealerTotal > playerPoints) {
+      setResult("💀 Dealer gewinnt!");
+    } else if (dealerTotal === playerPoints) {
+      setResult("Unentschieden!");
+    } else {
+      setResult("🎉 Du gewinnst!");
+    }
+  };
+  
+
+  // Spiel zurücksetzen
   const handleReset = () => {
     setPlayerCards([]);
     setDealerCards([]);
-    fetch('https://deckofcardsapi.com/api/deck/new/shuffle/?deck_count=6')
-      .then(res => res.json())
-      .then(data => {
-        setDeckId(data.deck_id);
-        setRemaining(data.remaining);
-      })
-      .catch(err => console.error("Fehler beim Reset des Spiels:", err));
+    setDeckId(null);
+    setRemaining(0);
+    setGameStarted(false);
+    setStake('');
+    setResult('');
+    setPlayerStand(false);
   };
+
+  // Beim Absenden des Einsatzformulars wird das Spiel gestartet
+  const handleStartGame = (e) => {
+    e.preventDefault();
+    if (stake.trim() === '' || isNaN(stake) || Number(stake) <= 0) {
+      alert("Bitte gib einen gültigen Einsatz ein.");
+      return;
+    }
+    setGameStarted(true);
+  };
+
+  // Falls das Spiel noch nicht gestartet ist, zeige das Einsatzformular
+  if (!gameStarted) {
+    return (
+      <div style={{ textAlign: 'center', fontFamily: 'Arial, sans-serif' }}>
+        <h1>Blackjack Spiel</h1>
+        <form onSubmit={handleStartGame}>
+          <label>
+            Einsatz:
+            <input 
+              type="number" 
+              value={stake} 
+              onChange={e => setStake(e.target.value)} 
+              style={{ margin: '10px', padding: '5px' }} 
+            />
+          </label>
+          <button type="submit" style={{ padding: '10px 20px' }}>Spiel starten</button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div style={{ textAlign: 'center', fontFamily: 'Arial, sans-serif' }}>
       <h1>Blackjack Spiel</h1>
+      <p>Einsatz: {stake}</p>
       <div style={{ marginBottom: '20px' }}>
         <h2>Spieler ({playerPoints} Punkte)</h2>
         <div>
@@ -98,8 +179,19 @@ function BlackjackGame() {
             <img key={index} src={card.image} alt={card.code} style={{ margin: '10px', height: '150px' }} />
           ))}
         </div>
-        <button onClick={handlePlayerDraw} style={{ padding: '10px 20px', margin: '10px' }}>
+        <button 
+          onClick={handlePlayerDraw} 
+          style={{ padding: '10px 20px', margin: '10px' }} 
+          disabled={result || playerStand}
+        >
           Karte ziehen
+        </button>
+        <button 
+          onClick={handleStand} 
+          style={{ padding: '10px 20px', margin: '10px' }} 
+          disabled={result || playerCards.length === 0 || playerStand}
+        >
+          Stand
         </button>
       </div>
       <div style={{ marginBottom: '20px' }}>
@@ -109,15 +201,20 @@ function BlackjackGame() {
             <img key={index} src={card.image} alt={card.code} style={{ margin: '10px', height: '150px' }} />
           ))}
         </div>
-        <button onClick={handleDealerDraw} style={{ padding: '10px 20px', margin: '10px' }}>
-          Dealer zieht
-        </button>
       </div>
       <div style={{ marginBottom: '20px' }}>
         <p>Verbleibende Karten im Deck: {remaining}</p>
       </div>
+      {result && (
+        <div style={{ margin: '20px', fontSize: '1.2em', fontWeight: 'bold', color: result.includes("gewinn") ? 'green' : 'red' }}>
+          {result}
+        </div>
+      )}
       <div>
-        <button onClick={handleReset} style={{ padding: '10px 20px', backgroundColor: '#f44336', color: '#fff' }}>
+        <button 
+          onClick={handleReset} 
+          style={{ padding: '10px 20px', backgroundColor: '#f44336', color: '#fff' }}
+        >
           Neues Spiel
         </button>
       </div>
